@@ -1,0 +1,1064 @@
+---
+title: "Connessioni pericolose: analisi delle interazioni della Mafia Siciliana"
+author: "Susanna Micoli"
+date: "10 febbraio 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## La Mafia Siciliana
+
+La criminalità organizzata opera attraverso reti di relazioni complesse, basate su vincoli di fiducia, gerarchie e comunicazioni strategiche.\
+
+In questa presentazione, utilizzeremo strumenti di Network Analysis per esplorare i dati raccolti nell’ambito dell’Operazione Montagna, un’indagine del 2007 che ha portato alla luce un vasto sistema di connessioni tra membri della Mafia Siciliana.\
+
+In particolare, questa indagine si è focalizzata su due clan mafiosi, noti come la "famiglia Mistretta" e il "clan Batanesi". Queste famiglie infatti, dal 2003 al 2007 si erano infiltrate in numerose attività economiche, tra cui grandi opere infrastrutturali.\
+
+La rete Mafiosa ha delle caratteristiche che la rendono unica e diversa dalle altre reti criminali.\
+
+Tipicamente le reti terroristiche sono costituite da individui che collaborano per perseguire un obiettivo e che sono disposte a sacrificare le loro vite per portarlo a termine (esempio l'attacco alle Torri Gemelle). Una volta raggiunto l'obiettivo generalmente l'organizzazione terroristica si dissolve.\
+
+Un clan mafioso invece dura diverse generazioni ed è caratterizzato da due elementi chiave:
+
+- i legami stretti con gli affiliati
+- la capacità di condurre attività illegali per perseguire obiettivi specifici
+
+
+<div style="text-align:center">
+  <img src="img_mafia.png" alt="Generated with DALL-E"/>
+  <p>Generated with DALL-E</p>
+</div>
+
+```{r, echo = FALSE, include=FALSE}
+#Carico le librerie
+
+library(tidyverse)
+library(tidygraph)
+library(ggraph)
+library(igraph)
+library(dplyr)
+library(tidyr)
+library(ggcorrplot)
+library(corrplot)
+library(RColorBrewer)
+library(ggwordcloud)
+library(ggplot2)
+
+```
+
+```{r echo=FALSE, include=FALSE}
+# Lettura dei file
+
+nodes = as.data.frame(read.csv("data/Montagna_Roles.csv"))
+edges_Meet = as.data.frame(read.csv("data/Meetings.csv"))
+edges_Phone = as.data.frame(read.csv("data/Phone_Calls.csv"))
+
+nodes
+edges_Meet
+edges_Phone
+```
+
+```{r echo=FALSE, include=FALSE}
+# Creo la colonna 'MacroRole' per creare una macrocategoria dei ruoli
+# Creo la colonna 'Clan' per riportare il nome della famiglia
+
+nodes <- nodes %>%
+  mutate(MacroRole = case_when(
+    # Leadership
+    grepl("boss|executive|co-founder", Role, ignore.case = TRUE) ~ "Leadership",
+    
+    # Affiliati
+    grepl("member|intermediator", Role, ignore.case = TRUE) ~ "Affiliates and Members",
+    
+    # Entrepreneurs & Professionals
+    Role != "" & !is.na(Role) ~ "Entrepreneurs & Professionals",
+    
+    # Stringhe vuote o NA
+    TRUE ~ "Undefined"
+  ),
+  Clan = str_extract(Role, "''(.*?)''") %>%
+      str_replace_all("''", "") %>%
+      replace_na("")
+  )
+```
+
+```{r echo=FALSE, include=FALSE}
+# ------ DATASET MEETINGS -------
+# Separo le colonne
+edges_Meet <- edges_Meet %>%
+  separate(Source.Target.Weight, into = c("to", "from", "weight"), sep = " ")
+
+# Trasformo la colonna weight in integer
+edges_Meet$weight <- as.integer(edges_Meet$weight)
+
+# Filtro gli archi che contengono solo nodi presenti nel dataframe nodes
+edges_Meet <- edges_Meet %>%
+  filter(from %in% nodes$Node & to %in% nodes$Node)
+
+# Nodi con almeno una connessione 
+connected_nodes <- unique(c(edges_Meet$to, edges_Meet$from))
+
+# Filtro i nodi che sono connessi
+nodes_m <- nodes %>%
+  filter(Node %in% connected_nodes)
+
+# Creo il grafo
+g_meet = graph_from_data_frame(edges_Meet, directed = FALSE, vertices = nodes_m)
+
+```
+
+```{r echo=FALSE, include=FALSE}
+# ------ DATASET MEETINGS - componente gigante -------
+
+# Prendo in considerazione solo la componente gigante
+
+# Prendo un elenco delle componenti connesse nel grafo
+components <- components(g_meet)
+
+# Trovo la componente gigante e ottengo i nomi dei nodi che fanno parte della componente gigante
+giant_comp_id <- which.max(components$csize)
+giant_nodes <- names(components$membership[components$membership == giant_comp_id])
+
+# Filtro i nodi e archi per mantenere solo la componente gigante
+g_giant <- induced_subgraph(g_meet, vids = giant_nodes)
+
+```
+
+```{r echo=FALSE, include=FALSE}
+# ------- DATASET PHONE CALLS -------
+
+# Rinomino le colonne
+edges_Phone <- edges_Phone %>%
+  rename(
+    to = Source,
+    from = Target,
+    weight = Weight
+  )
+
+# Filtro gli archi che contengono solo nodi presenti nel dataframe nodes
+edges_Phone <- edges_Phone %>%
+  filter(from %in% nodes$Node & to %in% nodes$Node)
+
+# Considerare solo i nodi connessi da almeno un arco
+connected_nodes2 <- unique(c(edges_Phone$to, edges_Phone$from))
+
+# Nodi con almeno una connessione 
+nodes_p <- nodes %>%
+  filter(Node %in% connected_nodes2)
+
+# Creo il grafo
+g_phone = graph_from_data_frame(edges_Phone, directed = FALSE, vertices = nodes_p)
+
+```
+
+```{r echo=FALSE, include=FALSE}
+# ------ DATASET PHONE CALLS - componente gigante -------
+
+# Prendo in considerazione solo la componente gigante
+
+# Prendo un elenco delle componenti connesse nel grafo
+components <- components(g_phone)
+
+# Trovo la componente gigante e ottengo i nomi dei nodi che fanno parte della componente gigante
+giant_comp_id2 <- which.max(components$csize)
+giant_nodes2 <- names(components$membership[components$membership == giant_comp_id2])
+
+# Filtro i nodi e archi per mantenere solo la componente gigante
+g_giant_p <- induced_subgraph(g_phone, vids = giant_nodes2)
+
+```
+
+```{r echo=FALSE, include=FALSE}
+# Numero di nodi ed archi dei due grafi
+
+n_m<-vcount(g_meet)
+n_p<-vcount(g_phone)
+
+a_m<-ecount(g_meet)
+a_p<-ecount(g_phone)
+```
+
+```{r echo=FALSE, include=FALSE}
+# Ci sono archi in comune tra i due grafi?
+
+# Salvo i nomi
+nodi_meet <- V(g_meet)$name  
+nodi_phone <- V(g_phone)$name 
+
+# Trovo l'intersezione tra i nodi dei due grafi
+nodi_comuni <- intersect(nodi_meet, nodi_phone)
+
+# Numero di nodi in comune
+num_nodi_comuni <- length(nodi_comuni)
+```
+
+## Il dataset: reti di incontri e comunicazioni telefoniche
+
+Il dataset, reso disponibile su [Zenodo](https://zenodo.org/records/3938818#.YW4WLhxxWUl), contiene informazioni dettagliate su interazioni fisiche e comunicazioni telefoniche tra i soggetti coinvolti nelle attività mafiose.\
+
+Dataset contenente 3 file CSV: 
+
+- **Roles**: Ruoli degli indagati e relazioni con altri sospettati
+- **Meetings**: Incontri fisici tra i sospettati (documentati tramite appostamenti della polizia). La frequenza degli incontri è rappresentata dalla colonna "weight"
+- **Phone Calls**: Telefonate intercettate tra i sospettati. La frequenza delle telefonate è rappresentata dalla colonna "weight"
+
+I nodi nel dataset sono stati anonimizzati, quindi non è possibile identificare direttamente gli individui, ma la struttura delle reti rimane comunque significativa per l'analisi. Le reti che è possibile costruire a partire da questi dataset sono indirette e pesate.
+
+Le reti risultanti per gli incontri fisici e le telefonate sono queste:
+
+```{r echo=FALSE}
+# Palette di colori
+palette_colors <- brewer.pal(n = length(unique(nodes$Clan)), "Set1")
+
+# Definisco le forme per i Macroruoli
+shape_mapping <- c(
+    "Leadership" = 21,  
+    "Affiliates and Members" = 24,  
+    "Entrepreneurs & Professionals" = 22, 
+    "Undefined" = 20
+)
+
+# Visualizzazione rete MEETING
+ggraph(g_meet, layout = "stress") + 
+  geom_edge_link(color = "grey52", alpha = 0.5) +  
+  geom_node_point(aes(fill = Clan, shape = MacroRole), 
+                  size = 5, color = "black", stroke = 1) +  
+  scale_fill_manual(values = palette_colors, name = "Clan") +
+  scale_shape_manual(values = shape_mapping, name = "MacroRole") +
+  labs(title = "Network Meetings", subtitle = "Interazioni basate sugli incontri") +
+  theme_void() +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(override.aes = list(shape = 21, size = 4)))  # Forza il colore nella legenda
+
+```
+
+La rete degli incontri con `r n_m` nodi e `r a_m` archi.\
+Si nota a destra una componente connessa gigante e componenti più piccole composte da pochissimi nodi a sinistra, questo perchè alcuni dati potrebbero essere mancanti. Spicca subito alla visione la numerosità e la concentrazione dei nodi della famiglia "Batanesi" (in verde), mentre appare più sparsa e meno numerosa la famiglia "Mistretta".\
+Ci sono molti imprenditori e professionisti che possono svolgere ruoli chiave nel supportare le attività dell'organizzazione criminale, fungendo da intermediari tra il mondo legale e quello illegale.
+
+```{r echo=FALSE}
+# Filtro solo i nodi appartenenti a "Entrepreneurs & Professionals"
+nodes_ep <- nodes %>%
+  filter(MacroRole == "Entrepreneurs & Professionals")
+
+# Conto le occorrenze dei diversi ruoli all'interno di questa categoria
+role_counts <- nodes_ep %>%
+  count(Role, sort = TRUE)
+
+# Creo la wordcloud
+ggplot(role_counts, aes(label = Role, size = n)) +
+  geom_text_wordcloud() +
+  scale_size_area(max_size = 15) +  
+  theme_minimal() +
+  labs(title = "Tag Cloud dei Ruoli - Entrepreneurs & Professionals")
+```
+
+Qui in una piccola tag cloud è possibile vedere nel dettaglio i ruoli più specifici della macro-categoria degli imprenditori. Si parte dal più gettonato e generale imprenditore, all’avvocato, all’autotrasportatore, al contadino fino all’ impiegato contabile presso il 113.
+
+```{r echo=FALSE}
+# Visualizzazione rete PHONE CALLS
+ggraph(g_phone, layout = "stress") +
+  geom_edge_link(color = "grey52", alpha = 0.5) +  
+  geom_node_point(aes(fill = Clan, shape = MacroRole), 
+                  size = 5, color = "black", stroke = 1) +  
+  scale_fill_manual(values = palette_colors, name = "Clan") +
+  scale_shape_manual(values = shape_mapping, name = "MacroRole") +
+  labs(title = "Network Phone Calls", subtitle = "Interazioni basate sulle chiamate") +
+  theme_void() +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(override.aes = list(shape = 21, size = 4)))
+```
+
+La rete delle telefonate con `r n_p` nodi e `r a_p` archi. \
+Sono coinvolte meno famiglie in questa rete e come per la rete degli incontri è possibile notare come le telefonate della “famiglia Batanesi” in blu, siano più raggruppate e coinvolgano più soggetto della stessa famiglia rispetto alla “famiglia Mistretta”.
+
+## Chi sono gli individui che hanno avuto più incontri o telefonate nella rete?
+
+```{r echo=FALSE, include=FALSE}
+# Converto in tibble graph
+ig_meet <- as_tbl_graph(g_meet)
+ig_phone <- as_tbl_graph(g_phone)
+
+```
+
+
+```{r echo=FALSE, include=FALSE}
+# Calcolo le misure di centralità per la rete degli incontri e delle telefonate
+# Poichè betweenness e closeness tengono conto del peso come distanza utilizzo il trucco di 
+# trasformare il peso da un valore di forza della connessione a un valore di distanza tra i nodi calcolando 1/weight
+# Se due persone si incontrano molto spesso (peso alto), il valore 1/weight diventa piccolo, quindi viene interpretato 
+# come distanza breve
+# Se due persone si incontrano raramente (peso basso), il valore 1/weight diventa grande, quindi viene interpretato
+# come distanza lunga 
+
+ig_meet <- ig_meet %>%
+  activate(nodes) %>%
+  mutate(
+    weighted_degree = centrality_degree(weights = weight),
+    betweenness = centrality_betweenness(),
+    closeness = centrality_closeness(),
+    weighted_eigenvector = centrality_eigen(weights = weight)
+  )
+
+ig_phone <- ig_phone %>%
+  activate(nodes) %>%
+  mutate(
+    weighted_degree = centrality_degree(weights = weight),
+    betweenness = centrality_betweenness(),
+    closeness = centrality_closeness(),
+    weighted_eigenvector = centrality_eigen(weights = weight)
+  )
+```
+
+```{r echo=FALSE}
+# Prendo i primi 10 nodi con valore più altro di degree centrality
+top_wnode_meet <- ig_meet %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(weighted_degree)) %>%  
+  select(name, Role, MacroRole, weighted_degree)
+top_10_nodes <- top_wnode_meet$name[1:10]
+
+# Crea il grafico
+ggraph(ig_meet, layout = "stress") +
+  geom_edge_link(aes(color = weight), width = 0.3, show.legend = FALSE) +
+  geom_node_point(aes(size = weighted_degree, color = MacroRole)) +
+  scale_edge_color_gradient(low = "lightgray", high = "black") +
+  geom_node_text(aes(label = ifelse(name %in% top_10_nodes, name, "")), 
+                 repel = TRUE, size = 3) +  # Etichetta solo i top 10 nodi
+  theme_void() +
+  ggtitle("Network Meetings - Weighted Degree Centrality") +
+  theme(legend.position = "bottom", legend.box = "horizontal") +
+  guides(size = "none") + 
+  scale_color_manual(values = c("Leadership" = "blue", 
+                                "Affiliates and Members" = "red", 
+                                "Entrepreneurs & Professionals" = "green", 
+                                "Undefined" = "gold4"),
+                     breaks = c("Leadership", "Affiliates and Members", "Entrepreneurs & Professionals", "Undefined"))
+```
+
+```{r echo=FALSE}
+head(top_wnode_meet, 10)
+```
+Sicuramente, osservando la rete e la tabella il vice Boss della famiglia Batanesi (N47) emerge come il nodo più centrale con il più alto weighted degree (65), suggerendo un ruolo chiave nel coordinamento della rete. La famiglia Batanesi appare più strutturata e connessa rispetto alla famiglia Mistretta, con diversi membri che ricoprono ruoli di Leadership o Affiliates and Members, indicando una rete più coesa. Al contrario, la famiglia Mistretta sembra meno influente, con solo due membri tra i più connessi.\
+Un caso interessante è il Pharmacist-member (N22), che con un grado pesato di 37 potrebbe fungere da intermediario tra il mondo legale e quello criminale, suggerendo un ruolo strategico nelle attività dell'organizzazione (es. riciclaggio, vendita illegale di farmaci).
+
+```{r echo=FALSE}
+top_wnode_phone <- ig_phone %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(weighted_degree)) %>%  
+  select(name, Role, MacroRole, weighted_degree)
+
+top_10_nodes_p <- top_wnode_phone$name[1:10]
+
+# Crea il grafico
+ggraph(ig_phone, layout = "stress") +
+  geom_edge_link(aes(color = weight), width = 0.3, show.legend = FALSE) +
+  geom_node_point(aes(size = weighted_degree, color = MacroRole)) +
+  scale_edge_color_gradient(low = "lightgray", high = "black") +
+  geom_node_text(aes(label = ifelse(name %in% top_10_nodes_p, name, "")), 
+                 repel = TRUE, size = 3) +  # Etichetta solo i top 10 nodi
+  theme_void() +
+  ggtitle("Network Phone Calls - Weighted Degree Centrality") +
+  theme(legend.position = "bottom", legend.box = "horizontal") +
+  guides(size = "none") + 
+  scale_color_manual(values = c("Leadership" = "blue", 
+                                "Affiliates and Members" = "red", 
+                                "Entrepreneurs & Professionals" = "green", 
+                                "Undefined" = "gold4"),
+                     breaks = c("Leadership", "Affiliates and Members", "Entrepreneurs & Professionals", "Undefined"))
+```
+```{r echo=FALSE}
+head(top_wnode_phone, 10)
+```
+In questa rete, la famiglia Mistretta mostra una leadership più connessa, con N18 (Executive, 67) come nodo più centrale, seguito da N61 (Executive, 46). Al contrario, la famiglia Batanesi ha una presenza meno connessa ai vertici, con il Deputy Boss (N47, 55) e altri executive con valori più bassi. Spicca N29 (Entrepreneur, 32), segnalando il possibile ruolo strategico di imprenditori nel collegare il mondo criminale e quello legale. Anche gli affiliati partecipano alla rete, mentre figure come N43 (Intermediator, 15) suggeriscono connessioni esterne rilevanti.
+
+Sembra quindi che la famiglia Mistretta prediliga le telefonate, mentre la famiglia Batanesi preferisca incontri segreti di persona.
+
+## Esistono pochi nodi altamente connessi o il peso è distribuito in modo omogeneo?
+
+```{r echo=FALSE}
+# Barplot per Meetings
+ggplot(edges_Meet, aes(x = weight)) + 
+  geom_bar(fill = "skyblue", color = "black") + 
+  theme_minimal() +
+  labs(title = "Distribution of Weights in the Meetings Network",
+       x = "Weight",
+       y = "Frequency") +
+  theme(axis.text = element_text(size = 10), 
+        axis.title = element_text(size = 12))
+```
+
+```{r echo=FALSE}
+# Barplot per Phone Calls
+ggplot(edges_Phone, aes(x = weight)) + 
+  geom_bar(fill = "lightgreen", color = "black") + 
+  theme_minimal() +
+  labs(title = "Distribution of Weights in the Phone Calls Network",
+       x = "Weight",
+       y = "Frequency") +
+  theme(axis.text = element_text(size = 10), 
+        axis.title = element_text(size = 12))
+```
+
+L'analisi della distribuzione dei gradi mostra che la rete segue una distribuzione esponenziale, con la maggior parte dei nodi che ha poche connessioni e solo alcuni nodi (gli hub) con un numero molto elevato di connessioni. Le reti scale-free presentano questi hub che mantengono la lunghezza media dei cammini bassa, facilitando la circolazione delle informazioni. Sebbene siano resistenti alla rimozione casuale di nodi, queste reti sono vulnerabili alla perdita degli hub, che compromette la connettività e il flusso delle informazioni.\
+Nella rete degli incontri, ci sono più nodi con pochi collegamenti rispetto alla rete delle telefonate (quasi il doppio).\
+Il peso massimo della rete degli incontri è 10, suggerendo che i mafiosi preferiscono incontri fisici per ridurre il rischio di intercettazioni (più semplice criptare le conversazioni e usare il linguaggio del corpo).\
+I nodi con grado più alto hanno ruolo di leadership, questo si conferma con il fatto che i capi spesso devono partecipare agli eventi mafiosi per perseguire e confermare il loro potere all’interno di un clan. Ad esempio, i capi devono partecipare ai funerali di altri affiliati o ad altre manifestazioni solenni. Durante questo tipo di eventi, hanno anche l’opportunità di trasmettere messaggi ai loro più stretti affiliati subordinati. 
+
+## Chi ha il ruolo di "collegamento" nella rete?
+
+```{r echo=FALSE}
+top_betweenness <- ig_meet %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(betweenness)) %>%
+  slice(1:10)  
+
+# Creazione del barplot
+ggplot(top_betweenness, aes(x = reorder(name, betweenness), 
+                                     y = betweenness, fill = MacroRole)) +
+  geom_bar(stat = "identity", color = "black") +  
+  coord_flip() +  
+  labs(title = "Top 10 - Weighted Betweenness Centrality (Meetings)", 
+       x = "Nodo", y = "Weighted Betweenness") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") 
+```
+
+```{r echo=FALSE}
+top_betweenness <- top_betweenness %>%
+  select(name, Role, MacroRole, betweenness)
+top_betweenness
+
+```
+Non è stato utilizzato il peso degli archi nel calcolo della betweenness centrality, poiché sarebbe stato interpretato come una distanza anziché come una frequenza dei collegamenti, modificando così l'interpretazione dei dati.\
+
+Dall'analisi emerge chiaramente che i membri con ruoli di leadership sono quelli con i valori di betweenness più alti, indicando che sono i principali "collegamenti" tra gli altri nodi. Per esempio, il nodo N18, che rappresenta un esponente di alto livello della famiglia Mistretta, ha il valore di betweenness più alto (1183.04), seguito da N68 e N47, che sono rispettivamente i leader delle famiglie Batanesi e il vice-capo della stessa famiglia. Questi nodi sono i punti di riferimento principali per il flusso delle informazioni e l'organizzazione interna.\
+Anche i membri di secondo piano, come il N12 (membro della famiglia Mistretta) e il N22 (farmacista affiliato), sebbene con valori di betweenness più bassi, sono comunque nodi significativi, fungendo da ponti tra i livelli più alti della rete e i membri più periferici. Ad esempio, il N22 potrebbe agire come intermediario tra i clan e il mondo esterno, come suggerito dal suo ruolo di farmacista.\
+Infine, ci sono nodi che, pur avendo un ruolo meno centrale, sono comunque importanti nella struttura complessiva della rete. Il N29, un entrepreneur, pur avendo un valore di betweenness più basso (361.90), potrebbe svolgere un ruolo essenziale come connettore in specifiche aree della rete economica o professionale.
+
+
+
+```{r echo=FALSE}
+top_betp <- ig_phone %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(betweenness)) %>%
+  slice(1:10)  
+
+# Creazione del barplot
+ggplot(top_betp, aes(x = reorder(name, betweenness), 
+                                     y = betweenness, fill = MacroRole)) +
+  geom_bar(stat = "identity", color = "black") +  
+  coord_flip() +  
+  labs(title = "Top 10 - Betweenness Centrality (Phone Calls)", 
+       x = "Node", y = "Betweenness") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") 
+```
+
+
+```{r echo=FALSE}
+top_betp <- top_betp %>%
+  select(name, Role, MacroRole, betweenness)
+top_betp
+
+```
+L'analisi della betweenness centrality nella rete delle telefonate mostra che i nodi con ruoli di leadership continuano a essere i più centrali nella rete, facilitando il flusso delle informazioni. In particolare, il nodo N18 (executive della famiglia Mistretta) ha il valore più alto di betweenness (1748.11), seguito da N61 (1138.33) e N47, il vice-capo della famiglia Batanesi (1017.82).\
+Un risultato interessante è l'alta centralità di N29, un entrepreneur (949.27), che potrebbe indicare un ruolo chiave nel collegamento tra la sfera criminale e il mondo economico. Anche il farmacista N22 e il membro N75 della famiglia Mistretta mostrano una betweenness rilevante, suggerendo la loro importanza come intermediari nella comunicazione.\
+Infine, i nodi N36 e N99, senza un ruolo definito, hanno una betweenness significativa, il che potrebbe indicare un ruolo nascosto o di supporto nella rete.
+
+
+Rispetto alla rete delle telefonate, la rete degli incontri presenta valori di betweenness più alti per i membri con ruoli di leadership, in particolare per i vertici delle famiglie mafiose.\
+Tuttavia, nella rete delle telefonate, emergono figure meno visibili ma strategiche, come N29 (entrepreneur) e N22 (pharmacist-member), con valori di betweenness più alti rispetto alla rete degli incontri. Questo potrebbe indicare che le telefonate vengono utilizzate per facilitare la comunicazione tra affiliati con ruoli più diversificati e per gestire aspetti operativi ed economici della rete mafiosa.\
+In sintesi, mentre la rete degli incontri è dominata dai vertici mafiosi, la rete delle telefonate mette in luce il ruolo di figure di supporto e intermediari che mantengono attiva la rete criminale.
+
+## Chi può diffondere le informazioni più rapidamente all'interno della rete?
+
+```{r echo=FALSE}
+# Trasformo in tibble graph
+g_giant <- as_tbl_graph(g_giant)
+
+# Calcolo delle misure di centralità
+g_giant <- g_giant %>%
+  activate(nodes) %>%
+  mutate(
+    weighted_degree = centrality_degree(weights = weight),
+    betweenness = centrality_betweenness(),
+    closeness = centrality_closeness(),
+    weighted_eigenvector = centrality_eigen(weights = weight)
+  )
+```
+
+```{r echo=FALSE}
+c_m <- g_giant %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(closeness)) %>%  
+  select(name, Role, MacroRole, closeness)
+
+c_w <- c_m$name[1:10]
+
+# Creo il grafico
+ggraph(g_giant, layout = "stress") +
+  geom_edge_link(aes(color = weight), width = 0.3, show.legend = FALSE) +
+  geom_node_point(aes(size = closeness, color = MacroRole)) +
+  scale_edge_color_gradient(low = "lightgray", high = "black") +
+  geom_node_text(aes(label = ifelse(name %in% c_w, name, "")), 
+                 repel = TRUE, size = 3) +  
+  theme_void() +
+  ggtitle("Network Meetings - Closeness Centrality") +
+  theme(legend.position = "bottom", legend.box = "horizontal") +
+  guides(size = "none") + 
+  scale_color_manual(values = c("Leadership" = "blue", 
+                                "Affiliates and Members" = "red", 
+                                "Entrepreneurs & Professionals" = "green", 
+                                "Undefined" = "gold4"),
+                     breaks = c("Leadership", "Affiliates and Members", "Entrepreneurs & Professionals", "Undefined"))
+
+```
+
+```{r echo=FALSE}
+head(c_m, n=10)
+```
+È stata considerata solo la componente gigante perché la closeness centrality si basa sulle distanze tra i nodi e ha senso calcolarla solo tra nodi che possono effettivamente raggiungersi. Le componenti più piccole avrebbero potuto falsare l'interpretazione. \
+Inoltre anche per questa misura si è preferito non considerare il peso sugli archi perché sarebbe stato interpretato nella misura come distanza e non come frequenza.
+
+L’analisi della closeness centrality nella rete degli incontri mostra che i leader delle famiglie Mistretta e Batanesi occupano posizioni centrali, facilitando la comunicazione e il coordinamento all’interno dell’organizzazione. Oltre ai capi e ai loro vice, anche alcuni imprenditori, come N29 e N64, ricoprono un ruolo strategico, probabilmente fungendo da ponte tra la rete criminale e il mondo economico.\
+Un altro nodo rilevante è N43, un intermediario che potrebbe agevolare il flusso di informazioni tra affiliati e vertici. Inoltre, la presenza del boss di Cosa Nostra a Messina (N11) tra i nodi con il valore più alto di closeness suggerisce che la rete non sia limitata a una singola area geografica, ma abbia connessioni più ampie.\
+Il boss di Cosa Nostra a Messina (N11) non è emerso tra i nodi con il valore più alto di degree centrality o betweenness centrality perché probabilmente il suo ruolo nella rete non è quello di mantenere molte connessioni dirette o di fungere da ponte tra diverse comunità. Invece, il suo valore elevato di closeness centrality suggerisce che, pur avendo un numero relativamente limitato di collegamenti, è strategicamente posizionato per raggiungere rapidamente tutti gli altri membri della rete.\
+Questo potrebbe riflettere un modello tipico delle organizzazioni mafiose, dove i boss tendono a mantenere un profilo basso per ridurre il rischio di essere intercettati, delegando la gestione operativa a intermediari fidati. Il loro potere non deriva dalla quantità di connessioni dirette, ma dalla capacità di accedere rapidamente alle informazioni e influenzare la rete senza essere un punto di snodo evidente.\
+Questi risultati indicano che la struttura mafiosa è progettata per garantire una comunicazione efficiente tra i vari livelli dell’organizzazione, con una combinazione di leader, intermediari e figure economiche in posizioni strategiche.
+
+
+```{r echo=FALSE}
+# Trasformo in tibble graph
+g_giant_p <- as_tbl_graph(g_giant_p)
+
+# Calcolo le misure di centralità
+g_giant_p <- g_giant_p %>%
+  activate(nodes) %>%
+  mutate(
+    weighted_degree = centrality_degree(weights = weight),
+    betweenness = centrality_betweenness(),
+    closeness = centrality_closeness(),
+    weighted_eigenvector = centrality_eigen(weights = weight)
+  )
+```
+
+```{r echo=FALSE}
+c_p <- g_giant_p %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  arrange(desc(closeness)) %>%  
+  select(name, Role, MacroRole, closeness)
+
+clo_p <- c_p$name[1:10]
+
+# Creo il grafico
+ggraph(g_giant_p, layout = "stress") +
+  geom_edge_link(aes(color = weight), width = 0.3, show.legend = FALSE) +
+  geom_node_point(aes(size = closeness, color = MacroRole)) +
+  scale_edge_color_gradient(low = "lightgray", high = "black") +
+  geom_node_text(aes(label = ifelse(name %in% clo_p, name, "")), 
+                 repel = TRUE, size = 3) +  
+  theme_void() +
+  ggtitle("Network Phone Calls - Closeness Centrality") +
+  theme(legend.position = "bottom", legend.box = "horizontal") +
+  guides(size = "none") + 
+  scale_color_manual(values = c("Leadership" = "blue", 
+                                "Affiliates and Members" = "red", 
+                                "Entrepreneurs & Professionals" = "green", 
+                                "Undefined" = "gold4"),
+                     breaks = c("Leadership", "Affiliates and Members", "Entrepreneurs & Professionals", "Undefined"))
+
+```
+
+```{r echo=FALSE}
+head(c_p, n=10)
+```
+L'analisi della closeness centrality nella rete delle telefonate rivela che i nodi più centrali appartengono a una varietà di ruoli, ma con una netta prevalenza di figure di leadership, imprenditori e alcuni membri affiliati. I due nodi che emergono con i valori più alti di closeness sono N18 e N61, entrambi legati alla famiglia Mistretta. Questo suggerisce che queste figure siano tra le più efficienti nel diffondere informazioni all'interno della rete, giocando un ruolo cruciale nella comunicazione e nel coordinamento delle attività.\
+Al terzo posto troviamo N29, un imprenditore, che si posiziona come un nodo strategico, probabilmente grazie alla sua posizione che gli consente di collegare vari membri della rete. Anche N47, il deputy boss della famiglia Batanesi, occupa una posizione centrale con un valore elevato di closeness, confermando la sua importanza all'interno della struttura comunicativa, dove svolge probabilmente un ruolo di mediazione tra diversi gruppi.
+
+Le telefonate servono a coordinare l'attività quotidiana e il flusso di informazioni in modo rapido ed efficiente, gli incontri sono probabilmente utilizzati per consolidare alleanze, discutere piani importanti e gestire relazioni più intime o delicate, con una maggiore partecipazione delle figure apicali della rete.\
+
+Questi risultati indicano che la struttura mafiosa è progettata per garantire una comunicazione efficiente tra i vari livelli dell’organizzazione, con una combinazione di leader, intermediari e figure economiche in posizioni strategiche.
+
+## I nodi con molte connessioni sono sempre i più influenti, anche considerando i nodi a cui sono collegati?
+
+```{r echo=FALSE}
+# Calcolo le misure di centralità e crea un dataframe
+centrality_df <- ig_meet %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  select(weighted_degree, betweenness, closeness, weighted_eigenvector)  
+
+# Calcolo la matrice di correlazione utilizzando il metodo di Spearman
+cor_matrix <- cor(centrality_df, method = "spearman")
+
+# Estraggo il valore della correlazione tra weighted_degree e weighted_eigenvector
+corr_m<-cor_matrix["weighted_degree", "weighted_eigenvector"]
+```
+
+```{r echo=FALSE}
+df_compare <- data.frame(
+  name = V(ig_meet)$name,
+  weighted_degree = V(ig_meet)$weighted_degree,
+  weighted_eigenvector = V(ig_meet)$weighted_eigenvector
+)
+
+# Creazione del grafico
+ggplot(df_compare, aes(x = weighted_degree, y = weighted_eigenvector)) +
+  geom_point(alpha = 0.6, color = "blue") +  
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  theme_minimal() +  
+  labs(
+    title = "Correlation between Weighted Degree and Eigenvector Centrality",
+    subtitle = "Network Meetings"
+  )
+```
+
+Qui la correlazione è più alta, il che significa che i nodi con molte connessioni (weighted degree) tendono ad avere anche un'alta influenza nella rete (weighted eigenvector). Questo suggerisce che negli incontri fisici, chi è molto connesso è probabilmente anche centrale nel flusso di informazioni e nelle dinamiche di potere.
+
+```{r echo=FALSE}
+df_compare <- data.frame(
+  name = V(ig_phone)$name,
+  weighted_degree = V(ig_phone)$weighted_degree,
+  weighted_eigenvector = V(ig_phone)$weighted_eigenvector
+)
+
+ggplot(df_compare, aes(x = weighted_degree, y = weighted_eigenvector)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "Correlation between Weighted Degree and Eigenvector Centrality",
+    subtitle = "Network Phone Calls"
+  )
+
+```
+
+```{r echo=FALSE}
+# Calcolo le misure di centralità e crea un dataframe
+centrality_df <- ig_phone %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  select(weighted_degree, betweenness, closeness, weighted_eigenvector)  
+
+# Calcolo la matrice di correlazione utilizzando il metodo di Spearman
+cor_matrix <- cor(centrality_df, method = "spearman")
+
+# Estraggo il valore della correlazione tra weighted_degree e weighted_eigenvector
+corr_p<-cor_matrix["weighted_degree", "weighted_eigenvector"]
+```
+
+La correlazione è più debole, indicando che avere molte connessioni non implica necessariamente un'alta influenza. Questo potrebbe dipendere dal fatto che le telefonate sono più distribuite tra diversi attori, con una maggiore eterogeneità nei ruoli e nelle connessioni.
+
+## Le reti degli incontri e delle telefonate seguono le stesse dinamiche comunicative o rispondono a esigenze diverse?
+
+```{r echo=FALSE}
+# Lunghezza media dei cammini
+
+camm_m<-mean_distance(ig_meet)
+camm_p<-mean_distance(ig_phone)
+```
+
+```{r echo=FALSE}
+# Diametro della rete 
+diameter_meet <- diameter(ig_meet, weights = NA)
+diameter_phone <- diameter(ig_phone, weights = NA)
+
+```
+
+```{r echo=FALSE}
+# Densità della rete
+density_meet <- edge_density(ig_meet)
+density_phone <- edge_density(ig_phone)
+```
+
+```{r echo = FALSE}
+# Calcolo del grado medio in ig_meet usando la colonna dei gradi pesati
+mean_weighted_degree_meet <- mean(V(ig_meet)$weighted_degree)
+
+# Calcolo del grado medio in ig_phone usando la colonna dei gradi pesati
+mean_weighted_degree_phone <- mean(V(ig_phone)$weighted_degree)
+
+```
+
+
+
+```{r echo=FALSE}
+# Trovo il diametro della rete (lista di nodi)
+diam_meet <- get_diameter(ig_meet, directed = FALSE)
+
+# Assegno i colori ai nodi
+V(ig_meet)$diameter_node <- ifelse(V(ig_meet)$name %in% V(ig_meet)[diam_meet]$name, "red", "lightgreen")
+
+# Trovo gli archi che appartengono al diametro
+edges_in_diameter <- c()
+for (i in seq(length(diam_meet) - 1)) {
+  edge_id <- get.edge.ids(ig_meet, c(diam_meet[i], diam_meet[i + 1]))
+  edges_in_diameter <- c(edges_in_diameter, edge_id)
+}
+
+# Assegno i colori agli archi
+E(ig_meet)$diameter_edge <- ifelse(seq_along(E(ig_meet)) %in% edges_in_diameter, "red", "darkgray")
+
+# Converto il grafo in formato tbl_graph per ggraph
+graph_tbl <- as_tbl_graph(ig_meet)
+
+# Creo il grafico
+ggraph(graph_tbl, layout = "stress") +
+  geom_edge_link(aes(color = factor(diameter_edge)), width = 0.7, alpha = 0.8) +  
+  geom_node_point(aes(color = factor(diameter_node)), size = 4, stroke = 1) +  
+  scale_edge_color_manual(values = c("red" = "red", "darkgray" = "darkgray")) +
+  scale_color_manual(values = c("red" = "red", "lightgreen" = "lightgreen")) + 
+  geom_node_text(aes(label = ifelse(V(graph_tbl)$name %in% V(graph_tbl)[diam_meet]$name, V(graph_tbl)$name, "")), 
+                 repel = TRUE, size = 3) + 
+  theme_void() +
+  ggtitle("Diameter of the Meetings Network") +
+  theme(legend.position = "none")+
+  guides(size = "none")
+```
+
+```{r echo=FALSE}
+# Trovo il diametro della rete (lista di nodi)
+diam_meet <- get_diameter(ig_phone, directed = FALSE)
+
+# Assegno i colori ai nodi
+V(ig_phone)$diameter_node <- ifelse(V(ig_phone)$name %in% V(ig_phone)[diam_meet]$name, "red", "lightblue")
+
+# Trovo gli archi che appartengono al diametro
+edges_in_diameter <- c()
+for (i in seq(length(diam_meet) - 1)) {
+  edge_id <- get.edge.ids(ig_phone, c(diam_meet[i], diam_meet[i + 1]))
+  edges_in_diameter <- c(edges_in_diameter, edge_id)
+}
+
+# Assegno i colori agli archi
+E(ig_phone)$diameter_edge <- ifelse(seq_along(E(ig_phone)) %in% edges_in_diameter, "red", "darkgray")
+
+# Converto il grafo in formato tbl_graph per ggraph
+graph_tbl <- as_tbl_graph(ig_phone)
+
+# Creo il grafico
+ggraph(graph_tbl, layout = "stress") +
+  geom_edge_link(aes(color = factor(diameter_edge)), width = 0.7, alpha = 0.8) +  
+  geom_node_point(aes(color = factor(diameter_node)), size = 4, stroke = 1) +  
+  scale_edge_color_manual(values = c("red" = "red", "darkgray" = "darkgray")) +
+  scale_color_manual(values = c("red" = "red", "lightblue" = "lightblue")) +  
+  geom_node_text(aes(label = ifelse(V(graph_tbl)$name %in% V(graph_tbl)[diam_meet]$name, V(graph_tbl)$name, "")), 
+                 repel = TRUE, size = 3) + 
+  theme_void() +
+  ggtitle("Diameter of the Phone Calls Network") +
+  theme(legend.position = "none")+
+  guides(size = "none")
+```
+
+La rete degli incontri è più compatta e interconnessa rispetto a quella delle telefonate, con una densità maggiore (`r density_meet` vs. `r density_phone`) e un numero più alto di connessioni (`r a_m` vs. `r a_p`).\
+Le informazioni si propagano più rapidamente attraverso gli incontri fisici, come dimostra la lunghezza media dei cammini più bassa (`r camm_m` vs. `r camm_p`) e un diametro leggermente inferiore (`r diameter_meet` vs. `r diameter_phone`).\
+In media, un nodo negli incontri ha quasi il doppio delle connessioni rispetto alla rete delle telefonate (grado medio ponderato di `r mean_weighted_degree_meet` vs. `r mean_weighted_degree_phone`), suggerendo interazioni più frequenti e dirette.\
+Le telefonate sembrano seguire una logica più selettiva e dispersa, probabilmente per motivi di sicurezza e coordinamento operativo.\
+Mentre gli incontri fisici potrebbero essere utilizzati per la trasmissione di informazioni strategiche e riservate, le telefonate servirebbero a mantenere i contatti senza esporre eccessivamente la rete.\
+Pur avendo lo stesso numero di nodi (`r n_m`), la rete delle telefonate risulta più frammentata e meno efficiente nel collegare direttamente i membri.
+
+## Come varia la distribuzione delle lunghezze dei percorsi più brevi all'interno della rete?
+
+```{r echo=FALSE}
+# Calcolo la matrice delle distanze pesate per la rete ig_meet
+dist_matrix_meet_weighted <- distances(ig_meet, weights = E(ig_meet)$weight)
+
+# Estraggo tutte le distanze come un vettore, escludendo i valori Inf (nodi non connessi)
+distances_meet <- dist_matrix_meet_weighted[dist_matrix_meet_weighted < Inf]
+
+# Calcolo la matrice delle distanze pesate per la rete ig_phone
+dist_matrix_phone_weighted <- distances(ig_phone, weights = E(ig_phone)$weight)
+
+# Estraggo tutte le distanze come un vettore, escludendo i valori Inf
+distances_phone <- dist_matrix_phone_weighted[dist_matrix_phone_weighted < Inf]
+
+# Creo un data frame per le distribuzioni delle distanze
+data_distribution <- data.frame(
+  Network = c(rep("ig_meet", length(distances_meet)),
+              rep("ig_phone", length(distances_phone))),
+  Shortest_Path_Length = c(distances_meet, distances_phone)
+)
+
+# Creo l'istogramma per la distribuzione delle lunghezze dei cammini
+ggplot(data_distribution, aes(x = Shortest_Path_Length, fill = Network)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "dodge") +
+  theme_minimal() +
+  labs(title = "Distribution of Shortest Path Lengths (Weighted)",
+       x = "Shortest Path Length",
+       y = "Frequency") +
+  scale_fill_manual(values = c("blue", "orange")) +
+  theme(legend.position = "top")
+```
+
+L'istogramma mostra la distribuzione delle lunghezze dei cammini minimi pesati per due reti: la rete degli incontri in blu e la rete delle chiamate in giallo.\
+Le osservazioni principali emergono chiaramente quando confrontiamo le due reti. La rete degli incontri presenta una distribuzione più concentrata su lunghezze di cammino più brevi. Questo indica che, all'interno di questa rete, le informazioni tendono a diffondersi in modo più rapido ed efficiente. Probabilmente, la presenza di molti collegamenti diretti tra i nodi facilita il passaggio delle informazioni, suggerendo una struttura di rete più coesa.\
+Al contrario, la rete delle telefonate mostra una distribuzione più ampia, con cammini minimi che raggiungono lunghezze maggiori. Questo suggerisce che, nella rete telefonica, la comunicazione è più dispersa e meno diretta, con alcune informazioni che devono attraversare più intermediari per arrivare ai destinatari. Potrebbe essere che la rete telefonica sia strutturata in modo da ridurre il rischio di intercettazioni o di identificazione di nodi chiave, mantenendo così una maggiore sicurezza o compartimentazione nella comunicazione.\
+Si può notare che in entrambe le reti non esistono cammini né troppo corti né troppo lunghi, indicando una maggiore frequenza di interazioni tra gli affiliati che si trovano in posizioni intermedie. Questo comportamento conferma l’ipotesi che all’interno di un clan sia meglio evitare i casi limite. Da un lato se il percorso più breve è composto da un numero basso di affiliati, i capi sono sovraesposti alle indagini della polizia. D’altra parte, più lungo è il numero di intermediari, maggiori sono le possibilità di essere intercettati da persone al di fuori della famiglia.\
+Inoltre, emerge una minore frequenza di interazioni nell’insieme di dati delle chiamate telefoniche rispetto che quella degli incontri. Questo comportamento, dimostra che il clan cerca di minimizzare il rischio di intercettazioni, specialmente per evitare di esporre i membri che sono gerarchicamente in un rango più alto. 
+
+
+## Quali sono i nodi in comune? 
+
+```{r echo=FALSE}
+# Visualizzazione grafo Meetings
+
+ig_meet2 <- ig_meet %>%
+  activate(nodes) %>%
+  mutate(color = ifelse(name %in% nodi_comuni, "red", "palegreen"),
+         label = ifelse(name %in% nodi_comuni, as.character(name), NA))
+
+ggraph(ig_meet2, layout = "stress") + 
+  geom_edge_link(color = "palegreen4", alpha = 0.6) + 
+  geom_node_point(aes(color = color), size = 3) +  # Colori assegnati dinamicamente
+  geom_node_text(aes(label = label), size = 3, repel = TRUE, na.rm = TRUE) +  # Etichette solo per i nodi in comune
+  scale_color_identity() +  # Usa direttamente i colori assegnati
+  labs(title = "Network Meetings") +
+  theme_void() +
+  theme(legend.position = "none")
+
+```
+
+
+```{r echo=FALSE}
+# Visualizzazione grafo Phone Calls
+ig_phone2 <- ig_phone %>%
+  activate(nodes) %>%
+  mutate(color = ifelse(name %in% nodi_comuni, "red", "deepskyblue"),
+         label = ifelse(name %in% nodi_comuni, as.character(name), NA))
+
+ggraph(ig_phone2, layout = "stress") + 
+  geom_edge_link(color = "deepskyblue4", alpha = 0.6) + 
+  geom_node_point(aes(color = color), size = 3) +  # Colori assegnati dinamicamente
+  geom_node_text(aes(label = label), size = 3, repel = TRUE, na.rm = TRUE) +  # Etichette solo per i nodi in comune
+  scale_color_identity() +  # Usa direttamente i colori assegnati
+  labs(title = "Network Phone Calls") +
+  theme_void() +
+  theme(legend.position = "none")
+
+```
+
+Si nota come la maggior parte dei nodi, in entrambe le reti siano centrali alla componente connessa gigante. 
+
+## Quali macro-ruoli sono più frequentemente soggetti ad arresto tra i nodi in comune?
+
+```{r echo=FALSE}
+
+# Estraggo i dati dei nodi comuni da entrambe le reti
+nodi_comuni_meet <- ig_meet %>%
+  activate(nodes) %>%
+  filter(name %in% nodi_comuni) %>%
+  select(name, Request, Role, MacroRole, weighted_degree) %>%
+  as_tibble()
+
+nodi_comuni_phone <- ig_phone %>%
+  activate(nodes) %>%
+  filter(name %in% nodi_comuni) %>%
+  select(name, Request, Role, MacroRole, weighted_degree) %>%
+  as_tibble()
+
+# Controllo che i valori di Request siano uguali per entrambe le reti
+# Unisco i due dataset per i nodi comuni, confrontando i valori di Request
+nodi_comuni_confrontati <- full_join(nodi_comuni_meet, nodi_comuni_phone, by = "name", suffix = c("_meet", "_phone"))
+
+# Aggiungo una colonna per verificare se i valori di Request sono uguali nelle due reti
+nodi_comuni_confrontati <- nodi_comuni_confrontati %>%
+  mutate(request_match = ifelse(Request_meet == Request_phone, "Match", "Mismatch"))
+
+# Metto a posto i valori della colonna Request_meet
+nodi_comuni_confrontati <- nodi_comuni_confrontati %>%
+  mutate(Request_meet = case_when(
+    is.na(Request_meet) | Request_meet == "" ~ "undefined",  
+    Request_meet == "arrest request denied" ~ "arrest request denied",  
+    Request_meet == "house arrest" ~ "house arrested",  
+    TRUE ~ "arrested"  
+  ))
+
+```
+
+```{r echo=FALSE}
+# Prima, raggruppo per 'Request' e 'MacroRole' e calcolo il numero di nodi in ciascun gruppo
+nodi_comuni_agg <- nodi_comuni_confrontati %>%
+  group_by(Request_meet, MacroRole_meet) %>%
+  summarise(count = n(), .groups = "drop")
+
+# Visualizzazione
+ggplot(nodi_comuni_agg, aes(x = Request_meet, y = count, fill = MacroRole_meet)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(x = "Request", 
+       y = "Number of Common Nodes", 
+       title = "Arrest Requests Divided by Macro-Roles for Common Nodes",
+       fill = "MacroRole") +  
+  theme_minimal() +  
+  scale_fill_brewer(palette = "Set3") +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r echo=FALSE}
+nodi_leadership_arrested <- nodi_comuni_meet %>%
+  filter(MacroRole == "Leadership", Request == "arrested") %>%
+  arrange(desc(weighted_degree))
+head(nodi_leadership_arrested)
+
+nodi_aff_arrested <- nodi_comuni_meet %>%
+  filter(MacroRole == "Affiliates and Members", Request == "arrested") %>%
+  arrange(desc(weighted_degree))
+head(nodi_aff_arrested)
+```
+La maggior parte degli arresti riguarda i ruoli di membri e affiliati e imprenditori.\
+Gli individui arrestati sono anche i nodi più importanti rappresentati nelle visualizzazioni precedenti.\
+Anche il nodo N22 rientra tra gli individui arrestati. Questo conferma la sua vicinanza alle attività mafiose.
+
+## Quale metrica è più efficace nel disgregare la rete?
+```{r echo=FALSE}
+# Definisco una funzione per calcolare la dimensione delle componenti connesse dopo aver rimosso i nodi
+remove_and_get_components <- function(graph, nodes_to_remove) {
+  g_copy <- graph
+  g_copy <- g_copy %>%
+    activate(nodes) %>%
+    filter(!name %in% nodes_to_remove)  # Rimuove i nodi specificati
+  return(components(g_copy)$no)  # Restituisce il numero di componenti connesse
+}
+
+# Creo un vettore per il numero di nodi da rimuovere
+num_nodes_removed <- seq(0, 50, by = 1)
+
+# Creo un data frame per memorizzare i risultati
+
+fragmentation <- data.frame(
+  Nodes_Removed = num_nodes_removed,
+  Random_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_meet
+    nodes_to_remove <- sample(V(g_temp), size = n)
+    g_temp <- delete_vertices(g_temp, nodes_to_remove)
+    components(g_temp)$no
+  }),
+  Degree_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_meet
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(weighted_degree)) %>%
+      slice_head(n = n) %>%
+      pull(name)  
+    remove_and_get_components(g_temp, nodes_to_remove)
+  }),
+  Betweenness_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_meet
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(betweenness)) %>%
+      slice_head(n = n) %>%
+      pull(name) 
+    remove_and_get_components(g_temp, nodes_to_remove)
+  }),
+  Eigen_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_meet
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(weighted_eigenvector)) %>%
+      slice_head(n = n) %>%
+      pull(name)  
+    remove_and_get_components(g_temp, nodes_to_remove)
+  })
+)
+
+
+ggplot(fragmentation, aes(x = Nodes_Removed)) +
+  geom_line(aes(y = Random_Removal, color = "Random Removal"), size = 1) +
+  geom_line(aes(y = Degree_Removal, color = "Degree Removal"), size = 1) +
+  geom_line(aes(y = Betweenness_Removal, color = "Betweenness Removal"), size = 1) +
+  geom_line(aes(y = Eigen_Removal, color = "Eigen Removal"), size = 1) +
+  labs(title = "Network Fragmentation Analysis",
+       subtitle = "Meetings Network",
+       x = "Number of Nodes Removed",
+       y = "Number of Connected Components") +
+  theme_minimal() +
+  scale_color_manual(values = c("Random Removal" = "Black", "Degree Removal" = "blue", 
+                                "Betweenness Removal" = "green", "Eigen Removal" = "purple"))
+
+```
+
+Per la rete degli incontri, eliminare un nodo alla volta scegliendo la metrica “betweenness centrality” risulta essere la scelta migliore, poiché porta rapidamente alla frammentazione della rete. Seguita dalla strategia di rimuovere i nodi con grado maggiore. Questo suggerisce che la rete è fortemente dipendente da pochi hub con molte connessioni. \
+La rimozione casuale è la scelta peggiore perché i nodi scelti casualmente non tengono conto di informazioni importanti di un nodo, quale l’importanza, la centralità, l’influenza dei vicini, ecc. Questo conferma che la rete ha una struttura non casuale, con alcuni nodi molto più importanti di altri.
+
+
+```{r echo=FALSE}
+fragmentation <- data.frame(
+  Nodes_Removed = num_nodes_removed,
+  Random_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_phone
+    nodes_to_remove <- sample(V(g_temp), size = n)
+    g_temp <- delete_vertices(g_temp, nodes_to_remove)
+    components(g_temp)$no
+  }),
+  Degree_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_phone
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(weighted_degree)) %>%
+      slice_head(n = n) %>%
+      pull(name)  
+    remove_and_get_components(g_temp, nodes_to_remove)
+  }),
+  Betweenness_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_phone
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(betweenness)) %>%
+      slice_head(n = n) %>%
+      pull(name) 
+    remove_and_get_components(g_temp, nodes_to_remove)
+  }),
+  Eigen_Removal = sapply(num_nodes_removed, function(n) {
+    g_temp <- ig_phone
+    nodes_to_remove <- g_temp %>%
+      activate(nodes) %>%
+      arrange(desc(weighted_eigenvector)) %>%
+      slice_head(n = n) %>%
+      pull(name)  
+    remove_and_get_components(g_temp, nodes_to_remove)
+  })
+)
+
+
+ggplot(fragmentation, aes(x = Nodes_Removed)) +
+  geom_line(aes(y = Random_Removal, color = "Random Removal"), size = 1) +
+  geom_line(aes(y = Degree_Removal, color = "Degree Removal"), size = 1) +
+  geom_line(aes(y = Betweenness_Removal, color = "Betweenness Removal"), size = 1) +
+  geom_line(aes(y = Eigen_Removal, color = "Eigen Removal"), size = 1) +
+  labs(title = "Network Fragmentation Analysis",
+       subtitle = "Phone Calls Network",
+       x = "Number of Nodes Removed",
+       y = "Number of Connected Components") +
+  theme_minimal() +
+  scale_color_manual(values = c("Random Removal" = "Black", "Degree Removal" = "blue", 
+                                "Betweenness Removal" = "green", "Eigen Removal" = "purple"))
+
+```
+
+Per la rete delle telefonate la frammentazione appare più rapida se vengono scelte le metriche betweenness e degree centrality. Questo potrebbe succedere poiché la rete delle telefonate è meno coesa e più dipendente da un numero limitato di nodi chiave.\
+In particolare, rimuovere fino a circa 20 nodi è possibile farlo con tutte le metriche ad eccezione della rimozione casuale. Fino a 40 nodi la scelta di rimozione con metrica betweenness o degree è indifferente. Successivamente la rimozione secondo la metrica betweenness sembra essere leggermente meno efficace del grado. Per poi risalire.\
+Anche in questo caso la rimozione casuale non è efficace.
+
+
+## Conclusioni
+L’analisi delle due reti, quella degli incontri e quella delle telefonate, rivela una struttura gerarchica e strategica, con i nodi di leadership e affiliati che giocano un ruolo cruciale nel mantenere la coesione e la diffusione delle informazioni all’interno della rete mafiosa. La rete degli incontri risulta più compatta e diretta, favorendo comunicazioni rapide e riservate, mentre la rete delle telefonate è più dispersa, utilizzata probabilmente per mantenere maggiore sicurezza e ridurre il rischio di intercettazioni. Le telefonate facilitano il coordinamento delle attività quotidiane e il rapido scambio di informazioni, mentre gli incontri servono probabilmente a rafforzare alleanze, discutere strategie cruciali e gestire relazioni riservate, coinvolgendo maggiormente le figure di vertice della rete. La centralità dei nodi chiave, come i leader e gli imprenditori, è confermata da metriche di centralità e betweenness, indicando che questi attori sono essenziali per il funzionamento della rete. Infine, l’analisi della rimozione dei nodi mostra come la rete sia altamente dipendente da pochi hub centrali, suggerendo una struttura non casuale e vulnerabile alla perdita di questi nodi strategici. In generale, entrambe le reti rivelano un equilibrio tra efficienza comunicativa e sicurezza, con i nodi più importanti esposti a un rischio maggiore di arresto.
+
+##
+
+> **"La lotta alla mafia dev’essere innanzitutto un movimento culturale che abitui tutti a sentire la bellezza del fresco profumo della libertà che si oppone al puzzo del compromesso morale, dell’indifferenza, della contiguità e quindi della complicità."**  
+> — *Paolo Borsellino* 
+
+Grazie per l'attenzione.\
+
+Susanna Micoli
